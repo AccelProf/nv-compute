@@ -74,21 +74,23 @@ void TensorFreeCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t r
 }
 
 
-void OperatorStartCallback(std::string op_name) {
+void OperatorStartCallback(void* ctx, std::string op_name) {
     if (!sanitizer_options.sanitizer_callback_enabled) {
         return;
     }
 
-    PRINT("[SANITIZER INFO] Torch operator start: %s\n", op_name.c_str());
+    PRINT("[SANITIZER INFO] Torch operator start: %s, ctx: %p\n", op_name.c_str(), ctx);
+    yosemite_operator_start_callback(ctx, op_name);
 }
 
 
-void OperatorEndCallback(std::string op_name) {
+void OperatorEndCallback(void* ctx, std::string op_name) {
     if (!sanitizer_options.sanitizer_callback_enabled) {
         return;
     }
 
-    PRINT("[SANITIZER INFO] Torch operator end: %s\n", op_name.c_str());
+    PRINT("[SANITIZER INFO] Torch operator end: %s, ctx: %p\n", op_name.c_str(), ctx);
+    yosemite_operator_end_callback(ctx, op_name);
 }
 
 void ModuleUnloadedCallback(CUmodule module) {
