@@ -69,11 +69,11 @@ bool sanitizer_cuda_api_internal() {
 
 
 void sanitizer_debug_wait() {
-    const char* debug = std::getenv("COMPUTE_SANITIZER_DEBUG");
+    const char* debug = std::getenv("ACCEL_PROF_DEBUG");
     if (debug) {
         while (debug_wait_flag);
     }
-    unsetenv("COMPUTE_SANITIZER_DEBUG");
+    unsetenv("ACCEL_PROF_DEBUG");
 }
 
 
