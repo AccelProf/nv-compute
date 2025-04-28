@@ -23,55 +23,34 @@ SanitizerPatchResult CommonCallback(
     auto* pTracker = (MemoryAccessTracker*)userdata;
 
     uint32_t active_mask = __activemask();
-    uint32_t laneid = get_laneid();
-    uint32_t first_laneid = __ffs(active_mask) - 1;
 
-    // check the number of accesses
-    int active_threads = __popc(active_mask);
-    if (laneid == first_laneid) {
-        atomicAdd((unsigned long long int*)&pTracker->accessCount, (unsigned long long int) active_threads);
-    }
-
-    // check touched memory per kernel
-    uint32_t keep = 1;
-    if (pTracker->access_state != nullptr && pTracker->tensor_access_state != nullptr) {
+    if (pTracker->access_state != nullptr) {
         MemoryAccessState* states = (MemoryAccessState*) pTracker->access_state;
         MemoryRange* start_end = states->start_end;
         MemoryRange range = {(uint64_t) ptr, 0};
         uint32_t pos = map_prev(start_end, range, states->size, gpu_address_comparator());
 
         if (pos != states->size) {
-            // Find an existing range
             if (atomic_load(states->touch + pos) == 0) {
-                // Update
                 atomic_store(states->touch + pos, 1);
-            } else {
-                // Filter out
-                keep = 0;
-            }
-        }
-
-        TensorAccessState* tensor_states = (TensorAccessState*) pTracker->tensor_access_state;
-        MemoryRange* tensor_start_end = tensor_states->start_end;
-        uint32_t tensor_pos = map_prev(tensor_start_end, range, tensor_states->size, gpu_address_comparator());
-
-        if (tensor_pos != tensor_states->size) {
-            if (atomic_load(tensor_states->touch + tensor_pos) == 0) {
-                atomic_store(tensor_states->touch + tensor_pos, 1);
-            } else {
-                keep = 0;
             }
         }
     }
     __syncwarp(active_mask);
-    
-    uint32_t all_keep = 0;
-    all_keep = ballot((uint32_t)keep, active_mask);
-    if (all_keep == 0) {
-        // Fast path
-        return SANITIZER_PATCH_SUCCESS;
-    }
 
+    if (pTracker->tensor_access_state != nullptr) {
+        TensorAccessState* tensor_states = (TensorAccessState*) pTracker->tensor_access_state;
+        MemoryRange* start_end = tensor_states->start_end;
+        MemoryRange range = {(uint64_t) ptr, 0};
+        uint32_t tensor_pos = map_prev(start_end, range, tensor_states->size, gpu_address_comparator());
+
+        if (tensor_pos != tensor_states->size) {
+            if (atomic_load(tensor_states->touch + tensor_pos) == 0) {
+                atomic_store(tensor_states->touch + tensor_pos, 1);
+            }
+        }
+    }
+    __syncwarp(active_mask);
 
     return SANITIZER_PATCH_SUCCESS;
 }
