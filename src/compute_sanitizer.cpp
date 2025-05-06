@@ -158,6 +158,9 @@ void ModuleLoadedCallback(CUmodule module)
     } else if (sanitizer_options.patch_name == GPU_PATCH_UVM_ADVISOR) {
         SANITIZER_SAFECALL(
             sanitizerPatchInstructions(SANITIZER_INSTRUCTION_GLOBAL_MEMORY_ACCESS, module, "MemoryGlobalAccessCallback"));
+    } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS) {
+        SANITIZER_SAFECALL(
+            sanitizerPatchInstructions(SANITIZER_INSTRUCTION_GLOBAL_MEMORY_ACCESS, module, "MemoryGlobalAccessCallback"));
     }
     
     SANITIZER_SAFECALL(sanitizerPatchModule(module));
@@ -192,6 +195,19 @@ void buffer_init(CUcontext context) {
             SANITIZER_SAFECALL(sanitizerAllocHost(context, (void**)&global_doorbell, sizeof(DoorBell)));
         }
     } else if (sanitizer_options.patch_name == GPU_PATCH_UVM_ADVISOR) {
+        if (!device_access_state)
+            SANITIZER_SAFECALL(sanitizerAlloc(context, (void**)&device_access_state, sizeof(MemoryAccessState)));
+
+        if (!host_access_state) {
+            SANITIZER_SAFECALL(sanitizerAllocHost(context, (void**)&host_access_state, sizeof(MemoryAccessState)));
+        }
+        if (!device_tensor_access_state) {
+            SANITIZER_SAFECALL(sanitizerAlloc(context, (void**)&device_tensor_access_state, sizeof(TensorAccessState)));
+        }
+        if (!host_tensor_access_state) {
+            SANITIZER_SAFECALL(sanitizerAllocHost(context, (void**)&host_tensor_access_state, sizeof(TensorAccessState)));
+        }
+    } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS) {
         if (!device_access_state)
             SANITIZER_SAFECALL(sanitizerAlloc(context, (void**)&device_access_state, sizeof(MemoryAccessState)));
 
