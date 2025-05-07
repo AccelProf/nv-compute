@@ -23,6 +23,13 @@ SanitizerPatchResult CommonCallback(
     auto* pTracker = (MemoryAccessTracker*)userdata;
 
     uint32_t active_mask = __activemask();
+    uint32_t laneid = get_laneid();
+    uint32_t first_laneid = __ffs(active_mask) - 1;
+
+    int active_threads = __popc(active_mask);
+    if (laneid == first_laneid) {
+        atomicAdd((unsigned long long int*)&pTracker->accessCount, (unsigned long long int) active_threads);
+    }
 
     if (pTracker->access_state != nullptr) {
         MemoryAccessState* states = (MemoryAccessState*) pTracker->access_state;

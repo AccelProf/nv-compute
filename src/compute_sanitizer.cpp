@@ -270,6 +270,18 @@ void LaunchBeginCallback(
                 sanitizerMemcpyHostToDeviceAsync(device_tensor_access_state, host_tensor_access_state, sizeof(TensorAccessState), hstream));
             host_tracker_handle->access_state = device_access_state;
             host_tracker_handle->tensor_access_state = device_tensor_access_state;
+        } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS) {
+            memset(host_access_state, 0, sizeof(MemoryAccessState));
+            memset(host_tensor_access_state, 0, sizeof(TensorAccessState));
+            yosemite_query_active_ranges(host_access_state->start_end, MAX_NUM_MEMORY_RANGES, &host_access_state->size);
+            yosemite_query_active_tensors(host_tensor_access_state->start_end, MAX_NUM_TENSOR_RANGES, &host_tensor_access_state->size);
+            SANITIZER_SAFECALL(
+                sanitizerMemcpyHostToDeviceAsync(device_access_state, host_access_state, sizeof(MemoryAccessState), hstream));
+            SANITIZER_SAFECALL(
+                sanitizerMemcpyHostToDeviceAsync(device_tensor_access_state, host_tensor_access_state, sizeof(TensorAccessState), hstream));
+            host_tracker_handle->access_state = device_access_state;
+            host_tracker_handle->tensor_access_state = device_tensor_access_state;
+            host_tracker_handle->accessCount = 0;
         }
 
         SANITIZER_SAFECALL(
@@ -327,6 +339,17 @@ void LaunchEndCallback(
             host_tracker_handle->access_state = host_access_state;
             yosemite_gpu_data_analysis(host_access_state, host_access_state->size);
         } else if (sanitizer_options.patch_name == GPU_PATCH_UVM_ADVISOR) {
+            SANITIZER_SAFECALL(sanitizerStreamSynchronize(hstream));
+            SANITIZER_SAFECALL(
+                sanitizerMemcpyDeviceToHost(host_tracker_handle, device_tracker_handle, sizeof(MemoryAccessTracker), hstream));
+            SANITIZER_SAFECALL(
+                sanitizerMemcpyDeviceToHost(host_access_state, device_access_state, sizeof(MemoryAccessState), hstream));
+            SANITIZER_SAFECALL(
+                sanitizerMemcpyDeviceToHost(host_tensor_access_state, device_tensor_access_state, sizeof(TensorAccessState), hstream));
+            host_tracker_handle->access_state = host_access_state;
+            host_tracker_handle->tensor_access_state = host_tensor_access_state;
+            yosemite_gpu_data_analysis(host_tracker_handle, 0);
+        } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS) {
             SANITIZER_SAFECALL(sanitizerStreamSynchronize(hstream));
             SANITIZER_SAFECALL(
                 sanitizerMemcpyDeviceToHost(host_tracker_handle, device_tracker_handle, sizeof(MemoryAccessTracker), hstream));
