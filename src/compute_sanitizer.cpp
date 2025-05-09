@@ -51,7 +51,7 @@ static TensorAccessState* host_tensor_access_state = nullptr;
 static TensorAccessState* device_tensor_access_state = nullptr;
 static DoorBell* global_doorbell = nullptr;
 
-static SanitizerOptions_t sanitizer_options;
+static AccelProfOptions_t sanitizer_options;
 // <module, is_patched>
 static std::map<CUmodule, bool> sanitizer_active_modules;
 
