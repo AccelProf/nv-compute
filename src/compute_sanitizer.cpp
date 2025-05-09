@@ -161,6 +161,11 @@ void ModuleLoadedCallback(CUmodule module)
     } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS) {
         SANITIZER_SAFECALL(
             sanitizerPatchInstructions(SANITIZER_INSTRUCTION_GLOBAL_MEMORY_ACCESS, module, "MemoryGlobalAccessCallback"));
+    } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS_CPU) {
+        SANITIZER_SAFECALL(
+            sanitizerPatchInstructions(SANITIZER_INSTRUCTION_GLOBAL_MEMORY_ACCESS, module, "MemoryGlobalAccessCallback"));
+        SANITIZER_SAFECALL(
+            sanitizerPatchInstructions(SANITIZER_INSTRUCTION_BLOCK_EXIT, module, "BlockExitCallback"));
     }
     
     SANITIZER_SAFECALL(sanitizerPatchModule(module));
@@ -219,6 +224,18 @@ void buffer_init(CUcontext context) {
         }
         if (!host_tensor_access_state) {
             SANITIZER_SAFECALL(sanitizerAllocHost(context, (void**)&host_tensor_access_state, sizeof(TensorAccessState)));
+        }
+    } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS_CPU) {
+        if (!device_access_buffer) {
+            SANITIZER_SAFECALL(
+                sanitizerAlloc(context, (void**)&device_access_buffer, sizeof(MemoryAccess) * MEMORY_ACCESS_BUFFER_SIZE));
+        }
+        if (!host_access_buffer) {
+            SANITIZER_SAFECALL(
+                sanitizerAllocHost(context, (void**)&host_access_buffer, sizeof(MemoryAccess) * MEMORY_ACCESS_BUFFER_SIZE));
+        }
+        if (!global_doorbell) {
+            SANITIZER_SAFECALL(sanitizerAllocHost(context, (void**)&global_doorbell, sizeof(DoorBell)));
         }
     }
 }
@@ -282,6 +299,17 @@ void LaunchBeginCallback(
             host_tracker_handle->access_state = device_access_state;
             host_tracker_handle->tensor_access_state = device_tensor_access_state;
             host_tracker_handle->accessCount = 0;
+        } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS_CPU) {
+            SANITIZER_SAFECALL(
+                sanitizerMemset(device_access_buffer, 0, sizeof(MemoryAccess) * MEMORY_ACCESS_BUFFER_SIZE, hstream));
+            host_tracker_handle->currentEntry = 0;
+            host_tracker_handle->numEntries = 0;
+            host_tracker_handle->access_buffer = device_access_buffer;
+
+            uint32_t num_threads = blockDims.x * blockDims.y * blockDims.z * gridDims.x * gridDims.y * gridDims.z;
+            global_doorbell->num_threads = num_threads;
+            global_doorbell->full = 0;
+            host_tracker_handle->doorBell = global_doorbell;
         }
 
         SANITIZER_SAFECALL(
@@ -360,6 +388,29 @@ void LaunchEndCallback(
             host_tracker_handle->access_state = host_access_state;
             host_tracker_handle->tensor_access_state = host_tensor_access_state;
             yosemite_gpu_data_analysis(host_tracker_handle, host_tracker_handle->accessCount);
+        } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS_CPU) {
+            while (true)
+            {
+                if (global_doorbell->num_threads == 0) {
+                    break;
+                }
+
+                if (global_doorbell->full) {
+                    PRINT("[SANITIZER INFO] Doorbell full with size %u. Analyzing data...\n", MEMORY_ACCESS_BUFFER_SIZE);
+                    SANITIZER_SAFECALL(sanitizerMemcpyDeviceToHost(host_access_buffer, device_access_buffer,
+                                                    sizeof(MemoryAccess) * MEMORY_ACCESS_BUFFER_SIZE, phstream));
+                    yosemite_gpu_data_analysis(host_access_buffer, MEMORY_ACCESS_BUFFER_SIZE);
+                    global_doorbell->full = 0;
+                }
+            }
+            SANITIZER_SAFECALL(sanitizerStreamSynchronize(hstream));
+            SANITIZER_SAFECALL(
+                sanitizerMemcpyDeviceToHost(host_tracker_handle, device_tracker_handle, sizeof(MemoryAccessTracker), hstream));
+
+            auto numEntries = host_tracker_handle->numEntries;
+            SANITIZER_SAFECALL(
+                sanitizerMemcpyDeviceToHost(host_access_buffer, device_access_buffer, sizeof(MemoryAccess) * numEntries, hstream));
+            yosemite_gpu_data_analysis(host_access_buffer, numEntries);
         }
     } else {
         SANITIZER_SAFECALL(sanitizerStreamSynchronize(hstream));
