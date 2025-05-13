@@ -31,8 +31,8 @@ SanitizerPatchResult CommonCallback(
         uint32_t pos = map_prev(start_end, range, states->size, gpu_address_comparator());
 
         if (pos != states->size) {
-            if (atomic_load(states->touch + pos) == 0) {
-                atomic_store(states->touch + pos, 1);
+            if (atomic_load((unsigned long long int*)states->touch + pos) == 0) {
+                atomic_store((unsigned long long int*)states->touch + pos, (unsigned long long int) 1);
             }
         }
     }
@@ -45,8 +45,8 @@ SanitizerPatchResult CommonCallback(
         uint32_t tensor_pos = map_prev(start_end, range, tensor_states->size, gpu_address_comparator());
 
         if (tensor_pos != tensor_states->size) {
-            if (atomic_load(tensor_states->touch + tensor_pos) == 0) {
-                atomic_store(tensor_states->touch + tensor_pos, 1);
+            if (atomic_load((unsigned long long int*)tensor_states->touch + tensor_pos) == 0) {
+                atomic_store((unsigned long long int*)tensor_states->touch + tensor_pos, (unsigned long long int) 1);
             }
         }
     }
