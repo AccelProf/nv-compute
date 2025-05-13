@@ -63,14 +63,14 @@ struct MemoryAccessState
 {
     uint32_t size;
     MemoryRange start_end[MAX_NUM_MEMORY_RANGES];
-    int32_t touch[MAX_NUM_MEMORY_RANGES];
+    uint64_t touch[MAX_NUM_MEMORY_RANGES];
 };
 
 struct TensorAccessState
 {
     uint32_t size;
     MemoryRange start_end[MAX_NUM_TENSOR_RANGES];
-    int32_t touch[MAX_NUM_TENSOR_RANGES];
+    uint64_t touch[MAX_NUM_TENSOR_RANGES];
 };
 
 struct DoorBell
