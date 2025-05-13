@@ -15,7 +15,7 @@
 #include <vector>
 #include <cstring>
 #include <cassert>
-
+#include <unordered_map>
 
 #define SANITIZER_VERBOSE 1
 
@@ -53,7 +53,7 @@ static DoorBell* global_doorbell = nullptr;
 
 static AccelProfOptions_t sanitizer_options;
 // <module, is_patched>
-static std::map<CUmodule, bool> sanitizer_active_modules;
+static std::unordered_map<CUmodule, bool> sanitizer_active_modules;
 
 
 void TensorMallocCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t reserved) {
@@ -243,12 +243,30 @@ void buffer_init(CUcontext context) {
 
 void LaunchBeginCallback(
     CUcontext context,
+    CUmodule module,
     CUfunction function,
     std::string functionName,
     Sanitizer_StreamHandle hstream,
     dim3 blockDims,
     dim3 gridDims)
 {
+    // sampling
+    sanitizer_options.grid_launch_id++;
+    if (sanitizer_options.grid_launch_id % sanitizer_options.sample_rate == 0) {
+        auto it = sanitizer_active_modules.find(module);
+        if (!it->second) {
+            SANITIZER_SAFECALL(sanitizerPatchModule(module));
+            it->second = true;
+        }
+    } else {
+        auto it = sanitizer_active_modules.find(module);
+        if (it->second) {
+            SANITIZER_SAFECALL(sanitizerUnpatchModule(module));
+            it->second = false;
+        }
+        return;
+    }
+
     if (sanitizer_options.patch_name != GPU_NO_PATCH) {
         buffer_init(context);
 
@@ -328,6 +346,11 @@ void LaunchEndCallback(
     Sanitizer_StreamHandle hstream,
     Sanitizer_StreamHandle phstream)
 {
+    // sampling
+    if (sanitizer_options.grid_launch_id % sanitizer_options.sample_rate != 0) {
+        return;
+    }
+
     if (sanitizer_options.patch_name != GPU_NO_PATCH) {
         if (sanitizer_options.patch_name == GPU_PATCH_APP_METRIC) {
             SANITIZER_SAFECALL(sanitizerStreamSynchronize(hstream));
@@ -559,8 +582,8 @@ void ComputeSanitizerCallback(
                             pLaunchData->gridDim_x, pLaunchData->gridDim_y, pLaunchData->gridDim_z,
                             pLaunchData->blockDim_x, pLaunchData->blockDim_y, pLaunchData->blockDim_z);
 
-                    LaunchBeginCallback(pLaunchData->context, pLaunchData->function, func_name,
-                                    pLaunchData->hStream, blockDims, gridDims);
+                    LaunchBeginCallback(pLaunchData->context, pLaunchData->module, pLaunchData->function,
+                                    func_name, pLaunchData->hStream, blockDims, gridDims);
                     break;
                 }
                 case SANITIZER_CBID_LAUNCH_END:
