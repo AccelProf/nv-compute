@@ -35,7 +35,7 @@ SanitizerPatchResult CommonCallback(
         uint32_t pos = map_prev(start_end, range, states->size, gpu_address_comparator());
 
         if (pos != states->size) {
-            atomicAdd(&(states->touch[pos]), 1);
+            atomicAdd((unsigned long long int*)&(states->touch[pos]), (unsigned long long int) 1);
         }
     }
     __syncwarp(active_mask);
