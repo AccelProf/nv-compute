@@ -44,7 +44,7 @@ SanitizerPatchResult CommonCallback(
             // Find an existing range
             if (atomic_load(states->touch + pos) == 0) {
                 // Update
-                atomic_store(states->touch + pos, 1);
+                atomic_store((unsigned long long int*)states->touch + pos, (unsigned long long int) 1);
             } else {
                 // Filter out
                 keep = 0;
