@@ -253,12 +253,14 @@ void LaunchBeginCallback(
     // sampling
     sanitizer_options.grid_launch_id++;
     if (sanitizer_options.grid_launch_id % sanitizer_options.sample_rate == 0) {
+        PRINT("[SANITIZER INFO] Monitoring kernel %s, launch id %d\n", functionName.c_str(), sanitizer_options.grid_launch_id);
         auto it = sanitizer_active_modules.find(module);
         if (!it->second) {
-            SANITIZER_SAFECALL(sanitizerPatchModule(module));
+            ModuleLoadedCallback(module);
             it->second = true;
         }
     } else {
+        PRINT("[SANITIZER INFO] Skipping kernel %s monitoring, launch id %d\n", functionName.c_str(), sanitizer_options.grid_launch_id);
         auto it = sanitizer_active_modules.find(module);
         if (it->second) {
             SANITIZER_SAFECALL(sanitizerUnpatchModule(module));
