@@ -537,8 +537,9 @@ void ComputeSanitizerCallback(
                 case SANITIZER_CBID_RESOURCE_DEVICE_MEMORY_ALLOC:
                 {
                     auto *pModuleData = (Sanitizer_ResourceMemoryData *)cbdata;
-                    if (pModuleData->flags == SANITIZER_MEMORY_FLAG_CG_RUNTIME || pModuleData->size == 0)
+                    if (pModuleData->flags == SANITIZER_MEMORY_FLAG_CG_RUNTIME || pModuleData->size == 0) {
                         break;
+                    }
 
                     PRINT("[SANITIZER INFO] Malloc memory %p with size %lu (flag: %u)\n",
                             (void*)pModuleData->address, pModuleData->size, pModuleData->flags);
