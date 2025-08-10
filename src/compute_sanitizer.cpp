@@ -55,24 +55,29 @@ static AccelProfOptions_t sanitizer_options;
 // <module, is_patched>
 static std::unordered_map<CUmodule, bool> sanitizer_active_modules;
 
+// <context, device> for multi-GPU support
+static std::unordered_map<CUcontext, CUdevice> sanitizer_ctx_to_device;
 
-void TensorMallocCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t reserved) {
+
+void TensorMallocCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t reserved, int device_id) {
     if (!sanitizer_options.sanitizer_callback_enabled) {
         return;
     }
 
-    PRINT("[SANITIZER INFO] Malloc tensor %p with size %ld, allocated %ld, reserved %ld\n", (void*)ptr, size, allocated, reserved);
-    yosemite_tensor_malloc_callback(ptr, size, allocated, reserved);
+    PRINT("[SANITIZER INFO] Malloc tensor %p with size %ld, allocated %ld, reserved %ld on device %d\n",
+            (void*)ptr, size, allocated, reserved, device_id);
+    yosemite_tensor_malloc_callback(ptr, size, allocated, reserved, device_id);
 }
 
 
-void TensorFreeCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t reserved) {
+void TensorFreeCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t reserved, int device_id) {
     if (!sanitizer_options.sanitizer_callback_enabled) {
         return;
     }
 
-    PRINT("[SANITIZER INFO] Free tensor %p with size %ld, allocated %ld, reserved %ld\n", (void*)ptr, size, allocated, reserved);
-    yosemite_tensor_free_callback(ptr, size, allocated, reserved);
+    PRINT("[SANITIZER INFO] Free tensor %p with size %ld, allocated %ld, reserved %ld on device %d\n",
+            (void*)ptr, size, allocated, reserved, device_id);
+    yosemite_tensor_free_callback(ptr, size, allocated, reserved, device_id);
 }
 
 
@@ -364,7 +369,9 @@ void LaunchBeginCallback(
             sanitizerMemcpyHostToDeviceAsync(device_tracker_handle, host_tracker_handle, sizeof(MemoryAccessTracker), hstream));
         SANITIZER_SAFECALL(sanitizerSetCallbackData(function, device_tracker_handle));
     }
-    yosemite_kernel_start_callback(functionName);
+
+    int device_id = sanitizer_ctx_to_device[context];
+    yosemite_kernel_start_callback(functionName, device_id);
 }
 
 
@@ -496,7 +503,8 @@ void LaunchEndCallback(
         SANITIZER_SAFECALL(sanitizerStreamSynchronize(hstream));
     }
 
-    yosemite_kernel_end_callback(functionName);
+    int device_id = sanitizer_ctx_to_device[context];
+    yosemite_kernel_end_callback(functionName, device_id);
 }
 
 
@@ -541,6 +549,7 @@ void ComputeSanitizerCallback(
                 case SANITIZER_CBID_RESOURCE_CONTEXT_CREATION_STARTING:
                 {
                     auto* pContextData = (Sanitizer_ResourceContextData*)cbdata;
+                    sanitizer_ctx_to_device.try_emplace(pContextData->context, pContextData->device);
                     PRINT("[SANITIZER INFO] Context %p creation starting on device %p\n",
                             &pContextData->context, &pContextData->device);
                     break;
@@ -555,6 +564,7 @@ void ComputeSanitizerCallback(
                 case SANITIZER_CBID_RESOURCE_CONTEXT_DESTROY_STARTING:
                 {
                     auto* pContextData = (Sanitizer_ResourceContextData*)cbdata;
+                    sanitizer_ctx_to_device.erase(pContextData->context);
                     PRINT("[SANITIZER INFO] Context %p destroy starting on device %p\n",
                             &pContextData->context, &pContextData->device);
                     break;
@@ -594,10 +604,12 @@ void ComputeSanitizerCallback(
                         break;
                     }
 
-                    PRINT("[SANITIZER INFO] Malloc memory %p with size %lu (flag: %u)\n",
-                            (void*)pModuleData->address, pModuleData->size, pModuleData->flags);
+                    CUdevice device_id = sanitizer_ctx_to_device[pModuleData->context];
 
-                    yosemite_alloc_callback(pModuleData->address, pModuleData->size, pModuleData->flags);
+                    PRINT("[SANITIZER INFO] Malloc memory %p with size %lu (flag: %u) on device %d\n",
+                            (void*)pModuleData->address, pModuleData->size, pModuleData->flags, device_id);
+
+                    yosemite_alloc_callback(pModuleData->address, pModuleData->size, pModuleData->flags, device_id);
                     break;
                 }
                 case SANITIZER_CBID_RESOURCE_DEVICE_MEMORY_FREE:
@@ -606,10 +618,12 @@ void ComputeSanitizerCallback(
                     if (pModuleData->flags == SANITIZER_MEMORY_FLAG_CG_RUNTIME || pModuleData->size == 0)
                         break;
 
-                    PRINT("[SANITIZER INFO] Free memory %p with size %lu (flag: %u)\n",
-                            (void*)pModuleData->address, pModuleData->size, pModuleData->flags);
+                    CUdevice device_id = sanitizer_ctx_to_device[pModuleData->context];
 
-                    yosemite_free_callback(pModuleData->address, pModuleData->size, pModuleData->flags);
+                    PRINT("[SANITIZER INFO] Free memory %p with size %lu (flag: %u) on device %d\n",
+                            (void*)pModuleData->address, pModuleData->size, pModuleData->flags, device_id);
+
+                    yosemite_free_callback(pModuleData->address, pModuleData->size, pModuleData->flags, device_id);
                     break;
                 }
                 default:
@@ -631,10 +645,13 @@ void ComputeSanitizerCallback(
                     gridDims.z = pLaunchData->gridDim_z;
                     auto func_name = sanitizer_demangled_name_get(pLaunchData->functionName);
 
-                    PRINT("[SANITIZER INFO] Launching kernel %s <<<(%u, %u, %u), (%u, %u, %u)>>>\n",
+                    CUdevice device_id = sanitizer_ctx_to_device[pLaunchData->context];
+
+                    PRINT("[SANITIZER INFO] Launching kernel %s <<<(%u, %u, %u), (%u, %u, %u)>>> on device %d\n",
                             func_name,
                             pLaunchData->gridDim_x, pLaunchData->gridDim_y, pLaunchData->gridDim_z,
-                            pLaunchData->blockDim_x, pLaunchData->blockDim_y, pLaunchData->blockDim_z);
+                            pLaunchData->blockDim_x, pLaunchData->blockDim_y, pLaunchData->blockDim_z,
+                            device_id);
 
                     LaunchBeginCallback(pLaunchData->context, pLaunchData->module, pLaunchData->function,
                                     func_name, pLaunchData->hStream, blockDims, gridDims);
@@ -649,10 +666,12 @@ void ComputeSanitizerCallback(
                     sanitizerGetStreamHandle(pLaunchData->context, p_stream, &p_stream_handle);
                     auto func_name = sanitizer_demangled_name_get(pLaunchData->functionName);
 
+                    CUdevice device_id = sanitizer_ctx_to_device[pLaunchData->context];
+
                     LaunchEndCallback(pLaunchData->context, pLaunchData->stream, pLaunchData->function,
                                     func_name, pLaunchData->hStream, p_stream_handle);
 
-                    PRINT("[SANITIZER INFO] Kernel %s finished\n", func_name);
+                    PRINT("[SANITIZER INFO] Kernel %s finished on device %d\n", func_name, device_id);
                     break;
                 }
                 default:
@@ -669,12 +688,15 @@ void ComputeSanitizerCallback(
                                      (pMemcpyData->direction == SANITIZER_MEMCPY_DIRECTION_HOST_TO_DEVICE) ? "H2D" :
                                      (pMemcpyData->direction == SANITIZER_MEMCPY_DIRECTION_DEVICE_TO_HOST) ? "D2H" :
                                      (pMemcpyData->direction == SANITIZER_MEMCPY_DIRECTION_DEVICE_TO_DEVICE) ? "D2D" : "UNKNOWN";
-                    PRINT("[SANITIZER INFO] Memcpy %p -> %p with size %lu, async: %d, direction: %s\n",
+                    
+                    CUdevice device_id = sanitizer_ctx_to_device[pMemcpyData->apiContext];
+
+                    PRINT("[SANITIZER INFO] Memcpy %p -> %p with size %lu, async: %d, direction: %s on device %d\n",
                             (void*)pMemcpyData->srcAddress, (void*)pMemcpyData->dstAddress, pMemcpyData->size,
-                            pMemcpyData->isAsync, direction);
+                            pMemcpyData->isAsync, direction, device_id);
 
                     yosemite_memcpy_callback(pMemcpyData->dstAddress, pMemcpyData->srcAddress,pMemcpyData->size,
-                                                pMemcpyData->isAsync, (uint32_t)pMemcpyData->direction);
+                                                pMemcpyData->isAsync, (uint32_t)pMemcpyData->direction, device_id);
                     break;
                 }
                 default:
@@ -687,11 +709,14 @@ void ComputeSanitizerCallback(
                 case SANITIZER_CBID_MEMSET_STARTING:
                 {
                     auto* pMemsetData = (Sanitizer_MemsetData*)cbdata;
-                    PRINT("[SANITIZER INFO] Memset %p with size %lu, value %d, async: %d\n",
-                            (void*)pMemsetData->address, pMemsetData->width, pMemsetData->value, pMemsetData->isAsync);
+                    CUdevice device_id = sanitizer_ctx_to_device[pMemsetData->context];
+
+                    PRINT("[SANITIZER INFO] Memset %p with size %lu, value %d, async: %d on device %d\n",
+                            (void*)pMemsetData->address, pMemsetData->width, pMemsetData->value, pMemsetData->isAsync,
+                            device_id);
 
                     yosemite_memset_callback(pMemsetData->address, pMemsetData->width,
-                                                pMemsetData->value, pMemsetData->isAsync);
+                                                pMemsetData->value, pMemsetData->isAsync, device_id);
                     break;
                 }
                 default:
@@ -704,14 +729,19 @@ void ComputeSanitizerCallback(
                 case SANITIZER_CBID_SYNCHRONIZE_STREAM_SYNCHRONIZED:
                 {
                     auto* pSyncData = (Sanitizer_SynchronizeData*)cbdata;
-                    PRINT("[SANITIZER INFO] Synchronize stream %p finished on context %p\n",
-                            &pSyncData->stream, &pSyncData->context);
+                    CUdevice device_id = sanitizer_ctx_to_device[pSyncData->context];
+
+                    PRINT("[SANITIZER INFO] Synchronize stream %p finished on context %p on device %d\n",
+                            &pSyncData->stream, &pSyncData->context, device_id);
                     break;
                 }
                 case SANITIZER_CBID_SYNCHRONIZE_CONTEXT_SYNCHRONIZED:
                 {
                     auto* pSyncData = (Sanitizer_SynchronizeData*)cbdata;
-                    PRINT("[SANITIZER INFO] Synchronize context %p finished\n", &pSyncData->context);
+                    CUdevice device_id = sanitizer_ctx_to_device[pSyncData->context];
+
+                    PRINT("[SANITIZER INFO] Synchronize context %p finished on device %d\n",
+                            &pSyncData->context, device_id);
                     break;
                 }
                 default:
