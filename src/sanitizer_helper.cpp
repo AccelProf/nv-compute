@@ -30,8 +30,11 @@ static std::map<CUcontext, CUstream> context_stream_map;
 void create_priority_stream(CUstream* p_stream) {
     cuda_api_internal = true;
     int priority_high, priority_low;
-    CUDA_SAFECALL(cudaDeviceGetStreamPriorityRange(&priority_low, &priority_high));
-    CUDA_SAFECALL(cudaStreamCreateWithPriority(p_stream, cudaStreamNonBlocking, priority_high););
+    CUDA_SAFECALL(
+        cudaDeviceGetStreamPriorityRange(&priority_low, &priority_high));
+    CUDA_SAFECALL(
+        cudaStreamCreateWithPriority(
+            p_stream, cudaStreamNonBlocking, priority_high););
     cuda_api_internal = false;
 }
 
@@ -44,7 +47,8 @@ void create_stream(CUstream* p_stream) {
 
 
 void sanitizer_priority_stream_get(CUcontext context, CUstream* p_stream) {
-    if (context_priority_stream_map.find(context) != context_priority_stream_map.end()) {
+    if (context_priority_stream_map.find(context) != context_priority_stream_map.end())
+    {
         *p_stream = context_priority_stream_map[context];
     } else {
         create_priority_stream(p_stream);
