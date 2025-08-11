@@ -59,7 +59,7 @@ static std::unordered_map<CUmodule, bool> sanitizer_active_modules;
 static std::unordered_map<CUcontext, CUdevice> sanitizer_ctx_to_device;
 
 
-void TensorMallocCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t reserved, int device_id) {
+void SanitizerTensorMallocCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t reserved, int device_id) {
     if (!sanitizer_options.sanitizer_callback_enabled) {
         return;
     }
@@ -70,7 +70,7 @@ void TensorMallocCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t
 }
 
 
-void TensorFreeCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t reserved, int device_id) {
+void SanitizerTensorFreeCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t reserved, int device_id) {
     if (!sanitizer_options.sanitizer_callback_enabled) {
         return;
     }
@@ -81,7 +81,7 @@ void TensorFreeCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t r
 }
 
 
-void OperatorStartCallback(void* ctx, std::string op_name) {
+void SanitizerOperatorStartCallback(void* ctx, std::string op_name) {
     if (!sanitizer_options.sanitizer_callback_enabled) {
         return;
     }
@@ -91,7 +91,7 @@ void OperatorStartCallback(void* ctx, std::string op_name) {
 }
 
 
-void OperatorEndCallback(void* ctx, std::string op_name) {
+void SanitizerOperatorEndCallback(void* ctx, std::string op_name) {
     if (!sanitizer_options.sanitizer_callback_enabled) {
         return;
     }
@@ -909,13 +909,13 @@ int InitializeInjection()
     if (sanitizer_options.torch_prof_enabled) {
         enable_torch_scope();
         register_torch_scope_callback(
-            TORCH_SCOPE_TENSOR_MALLOC, (torch_scope_callback_t)TensorMallocCallback);
+            TORCH_SCOPE_TENSOR_MALLOC, (torch_scope_callback_t)SanitizerTensorMallocCallback);
         register_torch_scope_callback(
-            TORCH_SCOPE_TENSOR_FREE, (torch_scope_callback_t)TensorFreeCallback);
+            TORCH_SCOPE_TENSOR_FREE, (torch_scope_callback_t)SanitizerTensorFreeCallback);
         register_torch_scope_callback(
-            TORCH_SCOPE_OPERATOR_START, (torch_scope_callback_t)OperatorStartCallback);
+            TORCH_SCOPE_OPERATOR_START, (torch_scope_callback_t)SanitizerOperatorStartCallback);
         register_torch_scope_callback(
-            TORCH_SCOPE_OPERATOR_END, (torch_scope_callback_t)OperatorEndCallback);
+            TORCH_SCOPE_OPERATOR_END, (torch_scope_callback_t)SanitizerOperatorEndCallback);
     }
 
     return 0;
