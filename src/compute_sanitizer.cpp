@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <chrono>
 
-#define SANITIZER_VERBOSE 0
+#define SANITIZER_VERBOSE 1
 
 #if SANITIZER_VERBOSE
 #define PRINT(...) do { fprintf(stdout, __VA_ARGS__); fflush(stdout); } while (0)
