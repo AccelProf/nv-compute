@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cassert>
 #include <unordered_map>
+#include <chrono>
 
 #define SANITIZER_VERBOSE 1
 
@@ -58,6 +59,14 @@ static std::unordered_map<CUmodule, bool> sanitizer_active_modules;
 // <context, device> for multi-GPU support
 static std::unordered_map<CUcontext, CUdevice> sanitizer_ctx_to_device;
 
+
+static double _trace_collection_time = 0.0;
+static double _trace_transfer_time = 0.0;
+static double _trace_analysis_time = 0.0;
+
+// static std::chrono::time_point<std::chrono::system_clock> _start_trace_collection_time;
+// static std::chrono::time_point<std::chrono::system_clock> _start_trace_transfer_time;
+// static std::chrono::time_point<std::chrono::system_clock> _start_trace_analysis_time;
 
 void SanitizerTensorMallocCallback(uint64_t ptr, int64_t size, int64_t allocated, int64_t reserved, int device_id) {
     if (!sanitizer_options.sanitizer_callback_enabled) {
@@ -523,7 +532,12 @@ void LaunchEndCallback(
             host_tracker_handle->tensor_access_state = host_tensor_access_state;
             yosemite_gpu_data_analysis(host_tracker_handle, 0);
         } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS) {
+            auto trace_collection_start_time = std::chrono::system_clock::now();
             SANITIZER_SAFECALL(sanitizerStreamSynchronize(hstream));
+            auto trace_collection_end_time = std::chrono::system_clock::now();
+            _trace_collection_time += std::chrono::duration<double>(trace_collection_end_time - trace_collection_start_time).count();
+
+            auto trace_transfer_start_time = std::chrono::system_clock::now();
             SANITIZER_SAFECALL(
                 sanitizerMemcpyDeviceToHost(
                     host_tracker_handle, device_tracker_handle, sizeof(MemoryAccessTracker), hstream));
@@ -536,8 +550,18 @@ void LaunchEndCallback(
 
             host_tracker_handle->access_state = host_access_state;
             host_tracker_handle->tensor_access_state = host_tensor_access_state;
+            auto trace_transfer_end_time = std::chrono::system_clock::now();
+            _trace_transfer_time += std::chrono::duration<double>(trace_transfer_end_time - trace_transfer_start_time).count();
+
+            auto trace_analysis_start_time = std::chrono::system_clock::now();
             yosemite_gpu_data_analysis(host_tracker_handle, host_tracker_handle->accessCount);
+            auto trace_analysis_end_time = std::chrono::system_clock::now();
+            _trace_analysis_time += std::chrono::duration<double>(trace_analysis_end_time - trace_analysis_start_time).count();
         } else if (sanitizer_options.patch_name == GPU_PATCH_APP_ANALYSIS_CPU) {
+            double tmp_trace_collection_time = 0.0;
+            double tmp_trace_transfer_time = 0.0;
+            double tmp_trace_analysis_time = 0.0;
+            auto trace_collection_start_time = std::chrono::system_clock::now();
             while (true)
             {
                 if (global_doorbell->num_threads == 0) {
@@ -545,18 +569,38 @@ void LaunchEndCallback(
                 }
 
                 if (global_doorbell->full) {
+                    auto trace_transfer_start_time = std::chrono::system_clock::now();
                     PRINT("[SANITIZER INFO] Doorbell full with size %u. Analyzing data...\n",
                                                                                     MEMORY_ACCESS_BUFFER_SIZE);
                     SANITIZER_SAFECALL(
                         sanitizerMemcpyDeviceToHost(host_access_buffer, device_access_buffer,
                                                     sizeof(MemoryAccess) * MEMORY_ACCESS_BUFFER_SIZE, phstream));
+                    
+
+                    auto trace_analysis_start_time = std::chrono::system_clock::now();
                     yosemite_gpu_data_analysis(host_access_buffer, MEMORY_ACCESS_BUFFER_SIZE);
+                    auto trace_analysis_end_time = std::chrono::system_clock::now();
+                    tmp_trace_analysis_time += std::chrono::duration<double>(trace_analysis_end_time - trace_analysis_start_time).count();
+                    
                     SANITIZER_SAFECALL(sanitizerMemset(
                             device_access_buffer, 0, sizeof(MemoryAccess) * MEMORY_ACCESS_BUFFER_SIZE, phstream));
 
                     global_doorbell->full = 0;
+                    auto trace_transfer_end_time = std::chrono::system_clock::now();
+                    tmp_trace_transfer_time += std::chrono::duration<double>(trace_transfer_end_time - trace_transfer_start_time).count();
                 }
+                
             }
+            auto trace_collection_end_time = std::chrono::system_clock::now();
+            tmp_trace_collection_time += std::chrono::duration<double>(trace_collection_end_time - trace_collection_start_time).count();
+            tmp_trace_collection_time -= tmp_trace_transfer_time;
+            tmp_trace_transfer_time -= tmp_trace_analysis_time;
+
+            _trace_collection_time += tmp_trace_collection_time;
+            _trace_transfer_time += tmp_trace_transfer_time;
+            _trace_analysis_time += tmp_trace_analysis_time;
+
+            auto trace_transfer_start_time = std::chrono::system_clock::now();
             SANITIZER_SAFECALL(sanitizerStreamSynchronize(hstream));
             SANITIZER_SAFECALL(
                 sanitizerMemcpyDeviceToHost(
@@ -566,8 +610,15 @@ void LaunchEndCallback(
             SANITIZER_SAFECALL(
                 sanitizerMemcpyDeviceToHost(
                     host_access_buffer, device_access_buffer, sizeof(MemoryAccess) * numEntries, hstream));
+            auto trace_transfer_end_time = std::chrono::system_clock::now();
+            _trace_transfer_time += std::chrono::duration<double>(trace_transfer_end_time - trace_transfer_start_time).count();
 
+            auto trace_analysis_start_time = std::chrono::system_clock::now();
             yosemite_gpu_data_analysis(host_access_buffer, numEntries);
+            auto trace_analysis_end_time = std::chrono::system_clock::now();
+            _trace_analysis_time += std::chrono::duration<double>(trace_analysis_end_time - trace_analysis_start_time).count();
+
+            _trace_collection_time += tmp_trace_collection_time;
         } else if (sanitizer_options.patch_name == GPU_PATCH_TIME_HOTNESS_CPU) {
             while (true)
             {
@@ -925,6 +976,12 @@ int InitializeInjection()
 
 void cleanup(void) {
     yosemite_terminate();
+    fprintf(stdout, "================================================================================\n");
+    fprintf(stdout, "[SANITIZER INFO] Trace collection time: %f seconds\n", _trace_collection_time);
+    fprintf(stdout, "[SANITIZER INFO] Trace transfer time: %f seconds\n", _trace_transfer_time);
+    fprintf(stdout, "[SANITIZER INFO] Trace analysis time: %f seconds\n", _trace_analysis_time);
+    fprintf(stdout, "================================================================================\n");
+    fflush(stdout);
 }
 
 __attribute__((constructor))
