@@ -795,7 +795,8 @@ void ComputeSanitizerCallback(
                                      (pMemcpyData->direction == SANITIZER_MEMCPY_DIRECTION_DEVICE_TO_DEVICE) ? "D2D" :
                                      "UNKNOWN";
                     
-                    CUdevice device_id = sanitizer_ctx_to_device[pMemcpyData->apiContext];
+                    // CUdevice device_id = sanitizer_ctx_to_device[pMemcpyData->apiContext];
+                    CUdevice device_id = sanitizer_ctx_to_device[pMemcpyData->srcContext];
 
                     PRINT("[SANITIZER INFO] Memcpy %p -> %p with size %lu, async: %d, direction: %s on device %d\n",
                             (void*)pMemcpyData->srcAddress, (void*)pMemcpyData->dstAddress, pMemcpyData->size,

@@ -3,7 +3,6 @@ CONFIGS := Makefile.config
 
 include $(CONFIGS)
 
-CUDA_PATH      ?= /usr/local/cuda
 SANITIZER_PATH ?= $(CUDA_PATH)/compute-sanitizer
 
 CXX            ?= g++
