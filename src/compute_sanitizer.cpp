@@ -150,6 +150,10 @@ void ModuleLoadedCallback(CUmodule module)
         // SANITIZER_SAFECALL(
         //     sanitizerPatchInstructions(
         //         SANITIZER_INSTRUCTION_MEMCPY_ASYNC, module, "MemcpyAsyncCallback"));
+    } else if (sanitizer_options.patch_name == GPU_PATCH_ROOFLINE_SIZE) {
+        SANITIZER_SAFECALL(
+            sanitizerPatchInstructions(
+                SANITIZER_INSTRUCTION_GLOBAL_MEMORY_ACCESS, module, "MemoryGlobalAccessCallback"));
     } else if (sanitizer_options.patch_name == GPU_PATCH_MEM_TRACE) {
         SANITIZER_SAFECALL(
             sanitizerPatchInstructions(
@@ -215,6 +219,8 @@ void buffer_init(CUcontext context) {
             SANITIZER_SAFECALL(
                 sanitizerAllocHost(context, (void**)&host_access_state, sizeof(MemoryAccessState)));
         }
+    } else if (sanitizer_options.patch_name == GPU_PATCH_ROOFLINE_SIZE) {
+        // no functions needed
     } else if (sanitizer_options.patch_name == GPU_PATCH_MEM_TRACE) {
         if (!device_access_buffer) {
             SANITIZER_SAFECALL(
@@ -353,6 +359,10 @@ void LaunchBeginCallback(
                     device_access_state, host_access_state, sizeof(MemoryAccessState), hstream));
             host_tracker_handle->accessCount = 0;
             host_tracker_handle->access_state = device_access_state;
+        } else if (sanitizer_options.patch_name == GPU_PATCH_ROOFLINE_SIZE) {
+            host_tracker_handle->accessCount = 0;
+            host_tracker_handle->accessSize = 0;
+
         } else if (sanitizer_options.patch_name == GPU_PATCH_MEM_TRACE) {
             SANITIZER_SAFECALL(
                 sanitizerMemset(
@@ -471,6 +481,13 @@ void LaunchEndCallback(
                     host_access_state, device_access_state, sizeof(MemoryAccessState), hstream));
             host_tracker_handle->access_state = host_access_state;
             yosemite_gpu_data_analysis(host_tracker_handle, host_tracker_handle->accessCount);
+        } else if (sanitizer_options.patch_name == GPU_PATCH_ROOFLINE_SIZE) {
+            SANITIZER_SAFECALL(sanitizerStreamSynchronize(hstream));
+            SANITIZER_SAFECALL(
+                sanitizerMemcpyDeviceToHost(
+                    host_tracker_handle, device_tracker_handle, sizeof(MemoryAccessTracker), hstream));
+            yosemite_gpu_data_analysis(host_tracker_handle, 0);
+
         } else if (sanitizer_options.patch_name == GPU_PATCH_MEM_TRACE) {
             while (true)
             {
