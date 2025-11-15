@@ -85,6 +85,7 @@ struct MemoryAccessTracker
     uint32_t currentEntry;
     uint32_t numEntries;
     uint64_t accessCount;
+    uint64_t accessSize;
     DoorBell* doorBell;
     MemoryAccess* access_buffer;
     MemoryAccessState* access_state;
